@@ -1,6 +1,6 @@
 # zug
 
-**zug** is a simple Rust command-line utility for encrypting and decrypting files using AES-256-GCM authenticated encryption.
+**zug** is a simple Rust command-line utility for encrypting and decrypting files using AES-256-GCM-SIV encryption.
 
 The project derives its name from the Swiss canton of *Zug*. Switzerland being one of the countries with the strongest privacy laws on earth. 🇨🇭🏔️
 
@@ -10,7 +10,7 @@ The project derives its name from the Swiss canton of *Zug*. Switzerland being o
 
 - Encrypt and decrypt files using a password-derived 256-bit key (SHA-256 hashed).
 - Embeds optional hints in encrypted files.
-- Uses AES-256-GCM for authenticated encryption.
+- Uses AES-256-GCM-SIV for encryption.
 ---
 
 ## Usage
@@ -49,7 +49,7 @@ zug -e "VerySecurePassword" ./my-file.txt
   ```
   [1-byte hint length][hint bytes][12-byte IV][encrypted data]
   ```
-- **Cryptography**: Uses the `aes-gcm` crate for AES-256-GCM encryption with random nonce.
+- **Cryptography**: Uses the `aes-gcm_siv` crate for AES-256-GCM-SIV encryption.
 
 ---
 
