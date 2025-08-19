@@ -1,4 +1,7 @@
-use std::io::Read;
+use std::{
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    vec,
+};
 
 use aes_gcm_siv::{
     Aes256GcmSiv, Nonce,
@@ -7,6 +10,9 @@ use aes_gcm_siv::{
 
 use crate::key::Key;
 
+const ENCRYPTION_BUFFER_SIZE: usize = 1024 * 64;
+const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + 16;
+const BUFFER_SIZE_INDICATOR_SIZE: usize = 4;
 const IV_LENGTH: usize = 12;
 
 /// Represents the encryption context, containing the file data to be encrypted
@@ -28,10 +34,10 @@ impl EncryptionContext {
     /// * `file_contents` - The file contents to be encrypted.
     /// * `hint` - An optional hint string (must be <= 255 bytes if present).
     pub fn new(file_contents: Vec<u8>, hint: Option<String>) -> Option<EncryptionContext> {
-        if let Some(ref hint) = hint {
-            if hint.len() > 255 {
-                return None;
-            }
+        if let Some(ref hint) = hint
+            && hint.len() > 255
+        {
+            return None;
         }
 
         Some(EncryptionContext {
@@ -131,6 +137,52 @@ pub fn encrypt(key: &Key, context: EncryptionContext) -> Vec<u8> {
     buf
 }
 
+pub fn encrypt_from_stream(
+    key: &Key,
+    hint: Option<String>,
+    reader: &mut BufReader<std::fs::File>,
+    writer: &mut BufWriter<std::fs::File>,
+) {
+    let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
+    let cipher = Aes256GcmSiv::new(aes_key);
+
+    let hint_bytes = hint.unwrap_or_default().into_bytes();
+    writer
+        .write_all(&[(hint_bytes.len() as u8)])
+        .expect("Could not write to output stream");
+    writer
+        .write_all(&hint_bytes)
+        .expect("Could not write to output stream");
+
+    let mut buf = [0u8; ENCRYPTION_BUFFER_SIZE];
+
+    loop {
+        let nonce = Aes256GcmSiv::generate_nonce(&mut OsRng);
+
+        let bytes_read = reader.read(&mut buf).unwrap();
+
+        let cipher_text = cipher
+            .encrypt(&nonce, &buf[..bytes_read])
+            .expect("Internal AES encryption error.");
+
+        writer
+            .write_all(&nonce)
+            .expect("Could not write to output stream");
+
+        writer
+            .write_all(&(cipher_text.len() as u32).to_le_bytes())
+            .expect("Could not write to output stream");
+
+        writer
+            .write_all(&cipher_text)
+            .expect("Could not write to output stream");
+
+        if bytes_read < ENCRYPTION_BUFFER_SIZE {
+            break;
+        }
+    }
+}
+
 /// Decrypts the encrypted contents stored in the `DecryptionContext`.
 ///
 /// Uses AES-GCM with the IV extracted from the context. Assumes the file contents
@@ -153,6 +205,50 @@ pub fn decrypt(key: &Key, mut context: DecryptionContext) -> Option<Vec<u8>> {
         .decrypt_in_place(iv, b"", &mut context.file_contents)
         .ok()
         .map(|_| context.file_contents)
+}
+
+pub fn decrypt_from_stream(
+    key: &Key,
+    reader: &mut BufReader<std::fs::File>,
+    writer: &mut BufWriter<std::fs::File>,
+) {
+    let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
+    let cipher = Aes256GcmSiv::new(aes_key);
+
+    let mut hint_length = [0u8; 1];
+    reader
+        .read_exact(&mut hint_length)
+        .expect("Could not read decryption stream.");
+
+    reader
+        .seek(SeekFrom::Current(hint_length[0] as i64))
+        .expect("Stream ended before reading full hint.");
+
+    // Nonce | Cipher Text Length | Max Cipher Length + Tag
+    let mut buf = [0u8; IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + CIPHER_TEXT_BLOCK_SIZE];
+
+    loop {
+        let bytes_read = reader.read(&mut buf).unwrap();
+        let nonce = &buf[..IV_LENGTH];
+        let cipher_text_length = u32::from_le_bytes(
+            buf[IV_LENGTH..IV_LENGTH + 4]
+                .try_into()
+                .expect("Could not read block length from decryption stream."),
+        ) as usize;
+        let cipher_text = &buf[IV_LENGTH + 4..IV_LENGTH + 4 + cipher_text_length];
+
+        let plain_text = cipher
+            .decrypt(nonce.into(), cipher_text)
+            .expect("Internal AES decryption error.");
+
+        writer
+            .write_all(&plain_text)
+            .expect("Could not write to output stream");
+
+        if bytes_read < IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + CIPHER_TEXT_BLOCK_SIZE {
+            break;
+        }
+    }
 }
 
 /// Extracts the hint string from the beginning of an encrypted file, if present.
