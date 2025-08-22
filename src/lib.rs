@@ -1,7 +1,4 @@
 use std::env;
-use std::io::BufReader;
-use std::io::BufWriter;
-use std::io::Write;
 use std::path;
 
 const MIN_PASSWORD_LENGTH: usize = 16;
@@ -46,11 +43,11 @@ fn handle_encryption(args: &[String]) {
     let output_file =
         std::fs::File::create_new(encrypted_file_path).expect("Could not create output file.");
 
-    let mut reader = BufReader::with_capacity(1024 * 64, input_file);
-    let mut writer = BufWriter::with_capacity(1024 * 64, output_file);
+    let mut reader = cipher::EncryptionReader::from_reader(input_file);
+    let mut writer = cipher::EncryptionWriter::from_writer(output_file);
 
     let encryption_result = cipher::encrypt_from_stream(&key, hint, &mut reader, &mut writer);
-    writer.flush().expect("Could not flush writer.");
+    writer.flush().expect("Could not flush writer");
 
     match encryption_result {
         Ok(_) => (),
@@ -77,11 +74,11 @@ fn handle_decryption(args: &[String]) {
     let output_file =
         std::fs::File::create_new(decrypted_file_path).expect("Could not create output file.");
 
-    let mut reader = BufReader::with_capacity(1024 * 64 + 4 + 12, input_file);
-    let mut writer = BufWriter::with_capacity(1024 * 64 + 4 + 12, output_file);
+    let mut reader = cipher::EncryptionReader::from_reader(input_file);
+    let mut writer = cipher::EncryptionWriter::from_writer(output_file);
 
     let decryption_result = cipher::decrypt_from_stream(&key, &mut reader, &mut writer);
-    writer.flush().expect("Could not flush writer.");
+    writer.flush().expect("Could not flush writer");
 
     match decryption_result {
         Ok(_) => (),

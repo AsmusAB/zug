@@ -11,9 +11,13 @@ use aes_gcm_siv::{
 use crate::key::Key;
 
 const ENCRYPTION_BUFFER_SIZE: usize = 1024 * 64;
-const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + 16;
+const AUTH_TAG_SIZE: usize = 16;
+const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + AUTH_TAG_SIZE;
 const BUFFER_SIZE_INDICATOR_SIZE: usize = 4;
 const IV_LENGTH: usize = 12;
+const READER_BUFFER_SIZE: usize = ENCRYPTION_BUFFER_SIZE;
+const WRITER_BUFFER_SIZE: usize =
+    IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + ENCRYPTION_BUFFER_SIZE + AUTH_TAG_SIZE;
 
 #[derive(Debug)]
 /// Represents possible errors that can occur when encrypting a file.
@@ -31,6 +35,59 @@ impl From<std::io::Error> for Error {
 impl From<aes_gcm_siv::Error> for Error {
     fn from(_: aes_gcm_siv::Error) -> Self {
         Error::AesError
+    }
+}
+
+/// A wrapper around `BufReader` that provides buffered reading for an underlying reader.
+/// The buffer size is set to match the encryption mechanism.
+///
+/// # Type Parameters
+/// - `R`: The type of the inner reader. Must implement `std::io::Read`.
+pub struct EncryptionReader<R: Read> {
+    reader: BufReader<R>,
+}
+
+impl<R: Read> EncryptionReader<R> {
+    /// Creates a new `EncryptionReader` from any type that implements `Read`.
+    pub fn from_reader(source: R) -> EncryptionReader<R> {
+        EncryptionReader {
+            reader: BufReader::with_capacity(READER_BUFFER_SIZE, source),
+        }
+    }
+
+    /// Consumes the `EncryptionReader` and returns the inner `BufReader`.
+    pub fn inner(&mut self) -> &mut BufReader<R> {
+        &mut self.reader
+    }
+}
+
+/// A wrapper around `BufWriter` that provides buffered writing for an underlying writer.
+/// The buffer size is set to match the decryption mechanism.
+///
+/// # Type Parameters
+/// - `W`: The type of the inner writer. Must implement `std::io::Write`.
+pub struct EncryptionWriter<W: Write> {
+    writer: BufWriter<W>,
+}
+
+impl<W: Write> EncryptionWriter<W> {
+    /// Creates a new `EncryptionWriter` from any type that implements `Write`.
+    pub fn from_writer(destination: W) -> EncryptionWriter<W> {
+        EncryptionWriter {
+            writer: BufWriter::with_capacity(WRITER_BUFFER_SIZE, destination),
+        }
+    }
+
+    /// Flushes the internal writer, ensuring all buffered data is written.
+    ///
+    /// Returns any I/O error encountered.
+    pub fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.writer.flush()
+    }
+
+    /// Consumes the `EncryptionWriter` and returns the inner `BufWriter`.
+    pub fn inner(&mut self) -> &mut BufWriter<W> {
+        &mut self.writer
     }
 }
 
@@ -62,9 +119,11 @@ impl From<aes_gcm_siv::Error> for Error {
 pub fn encrypt_from_stream(
     key: &Key,
     hint: Option<String>,
-    reader: &mut BufReader<std::fs::File>,
-    writer: &mut BufWriter<std::fs::File>,
+    reader: &mut EncryptionReader<std::fs::File>,
+    writer: &mut EncryptionWriter<std::fs::File>,
 ) -> Result<(), Error> {
+    let writer = writer.inner();
+    let reader = reader.inner();
     let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
     let cipher = Aes256GcmSiv::new(aes_key);
 
@@ -120,9 +179,11 @@ pub fn encrypt_from_stream(
 /// `Ok(())` on success, or `Error` on I/O or authentication failure.
 pub fn decrypt_from_stream(
     key: &Key,
-    reader: &mut BufReader<std::fs::File>,
-    writer: &mut BufWriter<std::fs::File>,
+    reader: &mut EncryptionReader<std::fs::File>,
+    writer: &mut EncryptionWriter<std::fs::File>,
 ) -> Result<(), Error> {
+    let reader = reader.inner();
+    let writer = writer.inner();
     let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
     let cipher = Aes256GcmSiv::new(aes_key);
 
