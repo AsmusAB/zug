@@ -32,6 +32,10 @@ fn handle_stream_encryption(args: &[String]) {
     };
 
     let password = args[2].trim();
+    if password.len() < MIN_PASSWORD_LENGTH {
+        println!("Password length is short. Please consider using a longer password.")
+    }
+
     let key = key::Key::from_str(password);
 
     let input_file = std::fs::File::open(path).expect("Could not read file at {path:?}");
