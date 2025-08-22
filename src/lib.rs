@@ -49,9 +49,16 @@ fn handle_stream_encryption(args: &[String]) {
     let mut reader = BufReader::with_capacity(1024 * 64, input_file);
     let mut writer = BufWriter::with_capacity(1024 * 64, output_file);
 
-    cipher::encrypt_from_stream(&key, hint, &mut reader, &mut writer);
-
+    let encryption_result = cipher::encrypt_from_stream(&key, hint, &mut reader, &mut writer);
     writer.flush().expect("Could not flush writer.");
+
+    match encryption_result {
+        Ok(_) => (),
+        Err(err) => {
+            std::fs::remove_file(encrypted_file_path).expect("Could not delete file.");
+            println!("Error during encryption: {:?}", err)
+        }
+    }
 }
 
 fn handle_stream_decryption(args: &[String]) {

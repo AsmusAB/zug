@@ -15,6 +15,26 @@ const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + 16;
 const BUFFER_SIZE_INDICATOR_SIZE: usize = 4;
 const IV_LENGTH: usize = 12;
 
+#[derive(Debug)]
+/// Represents possible errors that can occur when encrypting a file.
+pub enum EncryptionError {
+    /// An error occured when writing to the output stream.
+    WriteToStreamError,
+    AesError,
+}
+
+impl From<std::io::Error> for EncryptionError {
+    fn from(_: std::io::Error) -> Self {
+        EncryptionError::WriteToStreamError
+    }
+}
+
+impl From<aes_gcm_siv::Error> for EncryptionError {
+    fn from(_: aes_gcm_siv::Error) -> Self {
+        EncryptionError::AesError
+    }
+}
+
 /// Encrypts the given file contents using AES-GCM with a random IV.
 /// Prepends the encoded hint and IV to the output buffer.
 ///
@@ -34,17 +54,14 @@ pub fn encrypt_from_stream(
     hint: Option<String>,
     reader: &mut BufReader<std::fs::File>,
     writer: &mut BufWriter<std::fs::File>,
-) {
+) -> Result<(), EncryptionError> {
     let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
     let cipher = Aes256GcmSiv::new(aes_key);
 
     let hint_bytes = hint.unwrap_or_default().into_bytes();
-    writer
-        .write_all(&[(hint_bytes.len() as u8)])
-        .expect("Could not write to output stream");
-    writer
-        .write_all(&hint_bytes)
-        .expect("Could not write to output stream");
+    writer.write_all(&[(hint_bytes.len() as u8)])?;
+
+    writer.write_all(&hint_bytes)?;
 
     let mut buf = [0u8; ENCRYPTION_BUFFER_SIZE];
 
@@ -53,26 +70,18 @@ pub fn encrypt_from_stream(
 
         let bytes_read = reader.read(&mut buf).unwrap();
 
-        let cipher_text = cipher
-            .encrypt(&nonce, &buf[..bytes_read])
-            .expect("Internal AES encryption error.");
+        let cipher_text = cipher.encrypt(&nonce, &buf[..bytes_read])?;
 
-        writer
-            .write_all(&nonce)
-            .expect("Could not write to output stream");
-
-        writer
-            .write_all(&(cipher_text.len() as u32).to_le_bytes())
-            .expect("Could not write to output stream");
-
-        writer
-            .write_all(&cipher_text)
-            .expect("Could not write to output stream");
+        writer.write_all(&nonce)?;
+        writer.write_all(&(cipher_text.len() as u32).to_le_bytes())?;
+        writer.write_all(&cipher_text)?;
 
         if bytes_read < ENCRYPTION_BUFFER_SIZE {
             break;
         }
     }
+
+    Ok(())
 }
 
 /// Decrypts the encrypted contents stored in the `DecryptionContext`.
