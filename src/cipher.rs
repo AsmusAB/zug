@@ -11,9 +11,13 @@ use aes_gcm_siv::{
 use crate::key::Key;
 
 const ENCRYPTION_BUFFER_SIZE: usize = 1024 * 64;
-const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + 16;
+const AUTH_TAG_SIZE: usize = 16;
+const CIPHER_TEXT_BLOCK_SIZE: usize = ENCRYPTION_BUFFER_SIZE + AUTH_TAG_SIZE;
 const BUFFER_SIZE_INDICATOR_SIZE: usize = 4;
 const IV_LENGTH: usize = 12;
+const READER_BUFFER_SIZE: usize = ENCRYPTION_BUFFER_SIZE;
+const WRITER_BUFFER_SIZE: usize =
+    IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + ENCRYPTION_BUFFER_SIZE + AUTH_TAG_SIZE;
 
 #[derive(Debug)]
 /// Represents possible errors that can occur when encrypting a file.
@@ -47,7 +51,7 @@ impl<R: Read> EncryptionReader<R> {
     /// Creates a new `EncryptionReader` from any type that implements `Read`.
     pub fn from_reader(source: R) -> EncryptionReader<R> {
         EncryptionReader {
-            reader: BufReader::with_capacity(1024 * 64 * 4 + 12, source),
+            reader: BufReader::with_capacity(READER_BUFFER_SIZE, source),
         }
     }
 
@@ -70,7 +74,7 @@ impl<W: Write> EncryptionWriter<W> {
     /// Creates a new `EncryptionWriter` from any type that implements `Write`.
     pub fn from_writer(destination: W) -> EncryptionWriter<W> {
         EncryptionWriter {
-            writer: BufWriter::with_capacity(1024 * 64 * 4 + 12, destination),
+            writer: BufWriter::with_capacity(WRITER_BUFFER_SIZE, destination),
         }
     }
 
