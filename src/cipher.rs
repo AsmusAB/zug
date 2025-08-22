@@ -17,44 +17,54 @@ const IV_LENGTH: usize = 12;
 
 #[derive(Debug)]
 /// Represents possible errors that can occur when encrypting a file.
-pub enum EncryptionError {
-    /// An error occured when writing to the output stream.
+pub enum Error {
     WriteToStreamError,
     AesError,
 }
 
-impl From<std::io::Error> for EncryptionError {
+impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {
-        EncryptionError::WriteToStreamError
+        Error::WriteToStreamError
     }
 }
 
-impl From<aes_gcm_siv::Error> for EncryptionError {
+impl From<aes_gcm_siv::Error> for Error {
     fn from(_: aes_gcm_siv::Error) -> Self {
-        EncryptionError::AesError
+        Error::AesError
     }
 }
 
-/// Encrypts the given file contents using AES-GCM with a random IV.
-/// Prepends the encoded hint and IV to the output buffer.
+/// Encrypts a file stream in chunks using AES-256-GCM-SIV with per-block nonces.
 ///
-/// The final format is:
-/// `[hint_len (1 byte)][hint][iv (12 bytes)][ciphertext]`
+/// The output format is:
+/// ```text
+/// [hint_len (1 byte)]
+/// [hint (hint_len bytes)]
+/// repeat for each block:
+///   [nonce (12 bytes)]
+///   [ciphertext_len (4 bytes, little endian)]
+///   [ciphertext (ciphertext_len bytes)]
+/// ```
+///
+/// Each block is at most 64 KiB of plaintext + 16 bytes authentication tag.
+/// A fresh random nonce is generated for each block.
 ///
 /// # Arguments
 ///
-/// * `key` - The AES key to use for encryption.
-/// * `context` - The encryption context containing file data and optional hint.
+/// * `key` – The AES key used for encryption.
+/// * `hint` – An optional string hint to embed in the encrypted file.
+/// * `reader` – Input file reader.
+/// * `writer` – Output file writer.
 ///
 /// # Returns
 ///
-/// A `Vec<u8>` containing the formatted encrypted payload.
+/// `Ok(())` on success, or `Error` on I/O or encryption failure.
 pub fn encrypt_from_stream(
     key: &Key,
     hint: Option<String>,
     reader: &mut BufReader<std::fs::File>,
     writer: &mut BufWriter<std::fs::File>,
-) -> Result<(), EncryptionError> {
+) -> Result<(), Error> {
     let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
     let cipher = Aes256GcmSiv::new(aes_key);
 
@@ -84,35 +94,42 @@ pub fn encrypt_from_stream(
     Ok(())
 }
 
-/// Decrypts the encrypted contents stored in the `DecryptionContext`.
+/// Decrypts a file stream produced by [`encrypt_from_stream`].
 ///
-/// Uses AES-GCM with the IV extracted from the context. Assumes the file contents
-/// are in-place decryptable (i.e., the ciphertext buffer will become the plaintext).
+/// The input format is expected to be:
+/// ```text
+/// [hint_len (1 byte)]
+/// [hint (hint_len bytes)]
+/// repeat for each block:
+///   [nonce (12 bytes)]
+///   [ciphertext_len (4 bytes, little endian)]
+///   [ciphertext (ciphertext_len bytes)]
+/// ```
+///
+/// Decryption is performed block-by-block, verifying the AES-GCM-SIV tag for
+/// each ciphertext before writing the plaintext to the output stream.
 ///
 /// # Arguments
 ///
-/// * `key` - The AES key to use for decryption.
-/// * `context` - The decryption context containing the encrypted data and IV.
+/// * `key` – The AES key used for decryption.
+/// * `reader` – Encrypted input file reader.
+/// * `writer` – Decrypted output file writer.
 ///
 /// # Returns
 ///
-/// `Some(plaintext)` on success, or `None` if decryption fails (e.g., wrong key or authentication error).
+/// `Ok(())` on success, or `Error` on I/O or authentication failure.
 pub fn decrypt_from_stream(
     key: &Key,
     reader: &mut BufReader<std::fs::File>,
     writer: &mut BufWriter<std::fs::File>,
-) {
+) -> Result<(), Error> {
     let aes_key: &aes_gcm_siv::Key<Aes256GcmSiv> = &key.bytes().into();
     let cipher = Aes256GcmSiv::new(aes_key);
 
     let mut hint_length = [0u8; 1];
-    reader
-        .read_exact(&mut hint_length)
-        .expect("Could not read decryption stream.");
+    reader.read_exact(&mut hint_length)?;
 
-    reader
-        .seek(SeekFrom::Current(hint_length[0] as i64))
-        .expect("Stream ended before reading full hint.");
+    reader.seek(SeekFrom::Current(hint_length[0] as i64))?;
 
     // Nonce | Cipher Text Length | Max Cipher Length + Tag
     let mut buf = [0u8; IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + CIPHER_TEXT_BLOCK_SIZE];
@@ -127,24 +144,22 @@ pub fn decrypt_from_stream(
         ) as usize;
         let cipher_text = &buf[IV_LENGTH + 4..IV_LENGTH + 4 + cipher_text_length];
 
-        let plain_text = cipher
-            .decrypt(nonce.into(), cipher_text)
-            .expect("Internal AES decryption error.");
+        let plain_text = cipher.decrypt(nonce.into(), cipher_text)?;
 
-        writer
-            .write_all(&plain_text)
-            .expect("Could not write to output stream");
+        writer.write_all(&plain_text)?;
 
         if bytes_read < IV_LENGTH + BUFFER_SIZE_INDICATOR_SIZE + CIPHER_TEXT_BLOCK_SIZE {
             break;
         }
     }
+
+    Ok(())
 }
 
 /// Extracts the hint string from the beginning of an encrypted file, if present.
 ///
 /// Assumes the file format starts with:
-/// `[hint_len (1 byte)][hint (hint_len bytes)][iv (12 bytes)][ciphertext]`
+/// `[hint_len (1 byte)][hint (hint_len bytes)]`
 ///
 /// # Arguments
 ///

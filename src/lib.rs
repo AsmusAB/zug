@@ -9,7 +9,7 @@ const MIN_PASSWORD_LENGTH: usize = 16;
 mod cipher;
 mod key;
 
-fn handle_stream_encryption(args: &[String]) {
+fn handle_encryption(args: &[String]) {
     let path = path::Path::new(args[3].trim());
 
     if !is_encryptable_file(path) {
@@ -61,7 +61,7 @@ fn handle_stream_encryption(args: &[String]) {
     }
 }
 
-fn handle_stream_decryption(args: &[String]) {
+fn handle_decryption(args: &[String]) {
     let path = path::Path::new(args[3].trim());
 
     if !is_zug_file(path) {
@@ -80,9 +80,16 @@ fn handle_stream_decryption(args: &[String]) {
     let mut reader = BufReader::with_capacity(1024 * 64 + 4 + 12, input_file);
     let mut writer = BufWriter::with_capacity(1024 * 64 + 4 + 12, output_file);
 
-    cipher::decrypt_from_stream(&key, &mut reader, &mut writer);
-
+    let decryption_result = cipher::decrypt_from_stream(&key, &mut reader, &mut writer);
     writer.flush().expect("Could not flush writer.");
+
+    match decryption_result {
+        Ok(_) => (),
+        Err(err) => {
+            std::fs::remove_file(decrypted_file_path).expect("Could not delete file.");
+            println!("Error during decryption: {:?}", err)
+        }
+    }
 }
 
 fn handle_hint(args: &[String]) {
@@ -127,8 +134,8 @@ pub fn execute() {
     let mode = args[1].trim();
 
     match mode {
-        "-e" => handle_stream_encryption(&args),
-        "-d" => handle_stream_decryption(&args),
+        "-e" => handle_encryption(&args),
+        "-d" => handle_decryption(&args),
         "-h" => handle_hint(&args),
         _ => print_usage(),
     }
