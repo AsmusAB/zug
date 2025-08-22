@@ -9,17 +9,18 @@ The project derives its name from the Swiss canton of *Zug*. Switzerland being o
 ## Features
 
 - Encrypt and decrypt files using a password-derived 256-bit key (SHA-256 hashed).
-- Embeds optional hints in encrypted files.
-- Uses AES-256-GCM-SIV for encryption.
+- Embed optional human-readable hints in encrypted files.
+- Secure, chunked streaming encryption with AES-256-GCM-SIV.
+- Authentication on every encrypted block.
 ---
 
 ## Usage
 
-File encryption.
+Encrypt a file.
 ```bash
 zug -e <password> <path> [hint]
 ```
-File decryption.
+Decrypt a file.
 ```bash
 zug -d <password> <path>
 ```
@@ -37,25 +38,33 @@ zug -h <path>
 ## Example
 
 ```bash
-zug -e "VerySecurePassword" ./my-file.txt
+zug -e "VerySecurePassword" ./my-file.txt "my hint"
 ```
 
 ---
 
 ## Internals
 
-- **Key Derivation**: Uses SHA-256 to hash the password into a 256-bit key.
-- **Encryption Format**:
-  ```
-  [1-byte hint length][hint bytes][12-byte IV][encrypted data]
-  ```
-- **Cryptography**: Uses the `aes-gcm_siv` crate for AES-256-GCM-SIV encryption.
+- Key Derivation:
+  Passwords are hashed with SHA-256 to produce a 256-bit key.
 
----
+- Encryption Format:
+  The encrypted file is structured as follows:
 
-## Future Improvements
+      [1-byte hint length]
+      [hint bytes]
 
-- Support for streaming large files.
+      For each block:
+          [12-byte random nonce]
+          [4-byte ciphertext length (little endian)]
+          [ciphertext (<= 64 KiB + 16-byte authentication tag)]
+
+- Streaming:
+  Files are encrypted and decrypted in 64 KiB blocks.
+  Each block uses its own random nonce and authentication tag, ensuring integrity.
+
+- Cryptography:
+  Built on the aes-gcm-siv crate for AES-256-GCM-SIV encryption.
 
 ---
 
