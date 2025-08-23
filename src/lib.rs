@@ -97,7 +97,9 @@ fn handle_hint(args: &[String]) {
         return;
     }
 
-    match cipher::hint(path) {
+    let mut reader =
+        std::io::BufReader::new(std::fs::File::open(path).expect("Could not open file."));
+    match cipher::hint(&mut reader) {
         None => println!("File does not have a hint."),
         Some(hint) => println!("{hint}"),
     }
