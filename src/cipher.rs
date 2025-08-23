@@ -43,7 +43,7 @@ impl From<aes_gcm_siv::Error> for Error {
 ///
 /// # Type Parameters
 /// - `R`: The type of the inner reader. Must implement `std::io::Read`.
-pub struct EncryptionReader<R: Read> {
+pub struct EncryptionReader<R> {
     reader: BufReader<R>,
 }
 
@@ -116,11 +116,11 @@ impl<W: Write> EncryptionWriter<W> {
 /// # Returns
 ///
 /// `Ok(())` on success, or `Error` on I/O or encryption failure.
-pub fn encrypt_from_stream(
+pub fn encrypt_from_stream<R: Read + Seek, W: Write>(
     key: &Key,
     hint: Option<String>,
-    reader: &mut EncryptionReader<std::fs::File>,
-    writer: &mut EncryptionWriter<std::fs::File>,
+    reader: &mut EncryptionReader<R>,
+    writer: &mut EncryptionWriter<W>,
 ) -> Result<(), Error> {
     let writer = writer.inner();
     let reader = reader.inner();
@@ -177,10 +177,10 @@ pub fn encrypt_from_stream(
 /// # Returns
 ///
 /// `Ok(())` on success, or `Error` on I/O or authentication failure.
-pub fn decrypt_from_stream(
+pub fn decrypt_from_stream<R: Read + Seek, W: Write>(
     key: &Key,
-    reader: &mut EncryptionReader<std::fs::File>,
-    writer: &mut EncryptionWriter<std::fs::File>,
+    reader: &mut EncryptionReader<R>,
+    writer: &mut EncryptionWriter<W>,
 ) -> Result<(), Error> {
     let reader = reader.inner();
     let writer = writer.inner();
@@ -231,11 +231,9 @@ pub fn decrypt_from_stream(
 /// * `Some(String)` containing the UTF-8 decoded hint if present and valid.
 /// * `None` if the file can't be opened, the hint length is zero, the hint can't be read,
 ///   or the hint is not valid UTF-8.
-pub fn hint(path: &std::path::Path) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
-
+pub fn hint<R: Read>(reader: &mut std::io::BufReader<R>) -> Option<String> {
     let mut hint_length_buf = [0u8; 1];
-    file.read_exact(&mut hint_length_buf).ok()?;
+    reader.read_exact(&mut hint_length_buf).ok()?;
     let hint_length = hint_length_buf[0] as usize;
 
     if hint_length == 0 {
@@ -243,9 +241,77 @@ pub fn hint(path: &std::path::Path) -> Option<String> {
     }
 
     let mut hint_buf = vec![0u8; hint_length];
-    if file.read_exact(&mut hint_buf).is_err() {
+    if reader.read_exact(&mut hint_buf).is_err() {
         return None;
     }
 
     str::from_utf8(&hint_buf).ok().map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::RngCore;
+
+    use super::*;
+
+    fn create_cusor(data: Vec<u8>) -> std::io::Cursor<Vec<u8>> {
+        std::io::Cursor::new(data)
+    }
+
+    #[test]
+    fn none_if_no_hint_present() {
+        let file = vec![0u8, 65u8, 65u8, 65u8, 65u8];
+        let cursor = create_cusor(file);
+        let mut reader = std::io::BufReader::new(cursor);
+
+        let maybe_hint = hint(&mut reader);
+
+        assert_eq!(None, maybe_hint);
+    }
+
+    #[test]
+    fn some_if_hint_present() {
+        let file = vec![3u8, 65u8, 65u8, 65u8, 65u8];
+        let cursor = create_cusor(file);
+        let mut reader = std::io::BufReader::new(cursor);
+
+        let maybe_hint = hint(&mut reader);
+
+        assert_eq!(Some("AAA".to_string()), maybe_hint);
+    }
+
+    #[test]
+    fn decrypt_encrypted_data_is_original_data() {
+        let key = Key::from_str("password");
+
+        // Generate 1 MB of random plaintext.
+        // Encrypt it, then decrypt it and check that the two plain text matches.
+        let mut initial_plain_text = vec![0u8; 1024 * 1024];
+        rand::rng().fill_bytes(&mut initial_plain_text);
+
+        let cursor = create_cusor(initial_plain_text.clone());
+        let reader = std::io::BufReader::new(cursor);
+        let mut reader = EncryptionReader::from_reader(reader);
+
+        let mut writer_buf = Vec::new();
+        {
+            let writer = std::io::BufWriter::new(&mut writer_buf);
+            let mut writer = EncryptionWriter::from_writer(writer);
+
+            encrypt_from_stream(&key, Some("Hi".to_string()), &mut reader, &mut writer).unwrap();
+        }
+
+        let cipher_text = writer_buf;
+        let mut reader = EncryptionReader::from_reader(create_cusor(cipher_text));
+
+        let mut decrypted_plain_text = Vec::new();
+        {
+            let writer = std::io::BufWriter::new(&mut decrypted_plain_text);
+            let mut writer = EncryptionWriter::from_writer(writer);
+
+            decrypt_from_stream(&key, &mut reader, &mut writer).unwrap();
+        }
+
+        assert_eq!(initial_plain_text, decrypted_plain_text);
+    }
 }
