@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_encrypted_file_is_original_file() {
+    fn decrypt_encrypted_data_is_original_data() {
         let key = Key::from_str("password");
 
         // Generate 1 MB of random plaintext.
