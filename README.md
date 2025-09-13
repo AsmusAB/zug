@@ -18,7 +18,7 @@ The project derives its name from the Swiss canton of *Zug*. Switzerland being o
 
 Encrypt a file.
 ```bash
-zug -e <password> <path> [hint]
+zug -e <password> -h [hint] <path>
 ```
 Decrypt a file.
 ```bash
@@ -38,7 +38,7 @@ zug -h <path>
 ## Example
 
 ```bash
-zug -e "VerySecurePassword" ./my-file.txt "my hint"
+zug -e "VerySecurePassword" -h "my hint" my-file.txt
 ```
 
 ---
