@@ -7,25 +7,14 @@ mod cipher;
 mod key;
 
 fn handle_encryption(args: &[String]) {
-    let path = path::Path::new(args[3].trim());
-
-    if !is_encryptable_file(path) {
-        println!("Can only encrypt files with an extension.");
-        return;
-    }
-
-    if is_zug_file(path) {
-        println!("Cannot encrypt an encrypted file.");
-        return;
-    }
-
-    let hint = if args.len() > 4 {
-        match args[4].trim() {
-            "" => None,
-            hint => Some(hint.to_owned()),
+    let hint = match args[3].trim() {
+        "-h" => {
+            if args.len() < 4 {
+                panic!("Expected a hint")
+            }
+            Some(args[4].to_owned())
         }
-    } else {
-        None
+        _ => None,
     };
 
     let password = args[2].trim();
@@ -35,56 +24,84 @@ fn handle_encryption(args: &[String]) {
 
     let key = key::Key::from_str(password);
 
-    let input_file = std::fs::File::open(path).expect("Could not read file at {path:?}");
+    let path_index_start = match hint {
+        Some(_) => 5,
+        None => 3,
+    };
 
-    let encrypted_file_path = format!("{}.zug", path.to_str().unwrap());
-    let encrypted_file_path = path::Path::new(&encrypted_file_path);
+    let paths: Vec<&path::Path> = args[path_index_start..args.len()]
+        .iter()
+        .map(|x| path::Path::new(x))
+        .collect();
 
-    let output_file =
-        std::fs::File::create_new(encrypted_file_path).expect("Could not create output file.");
+    for path in paths {
+        if !is_encryptable_file(path) {
+            println!("Can only encrypt files with an extension.");
+            return;
+        }
 
-    let mut reader = cipher::EncryptionReader::from_reader(input_file);
-    let mut writer = cipher::EncryptionWriter::from_writer(output_file);
+        if is_zug_file(path) {
+            println!("Cannot encrypt an encrypted file.");
+            return;
+        }
 
-    let encryption_result = cipher::encrypt_from_stream(&key, hint, &mut reader, &mut writer);
-    writer.flush().expect("Could not flush writer");
+        let input_file = std::fs::File::open(path).expect("Could not read file at {path:?}");
 
-    match encryption_result {
-        Ok(_) => (),
-        Err(err) => {
-            std::fs::remove_file(encrypted_file_path).expect("Could not delete file.");
-            println!("Error during encryption: {:?}", err)
+        let encrypted_file_path = format!("{}.zug", path.to_str().unwrap());
+        let encrypted_file_path = path::Path::new(&encrypted_file_path);
+
+        let output_file =
+            std::fs::File::create_new(encrypted_file_path).expect("Could not create output file.");
+
+        let mut reader = cipher::EncryptionReader::from_reader(input_file);
+        let mut writer = cipher::EncryptionWriter::from_writer(output_file);
+
+        let encryption_result =
+            cipher::encrypt_from_stream(&key, hint.clone(), &mut reader, &mut writer);
+        writer.flush().expect("Could not flush writer");
+
+        match encryption_result {
+            Ok(_) => (),
+            Err(err) => {
+                std::fs::remove_file(encrypted_file_path).expect("Could not delete file.");
+                println!("Error during encryption: {:?}", err)
+            }
         }
     }
 }
 
 fn handle_decryption(args: &[String]) {
-    let path = path::Path::new(args[3].trim());
-
-    if !is_zug_file(path) {
-        println!("Not a file encrypted using zug");
-        return;
-    }
-
     let password = args[2].trim();
     let key = key::Key::from_str(password);
 
-    let input_file = std::fs::File::open(path).expect("Could not read file at {path:?}");
-    let decrypted_file_path = path.file_stem().unwrap().to_str().unwrap();
-    let output_file =
-        std::fs::File::create_new(decrypted_file_path).expect("Could not create output file.");
+    let paths: Vec<&path::Path> = args[3..args.len()]
+        .iter()
+        .map(|x| path::Path::new(x))
+        .collect();
 
-    let mut reader = cipher::EncryptionReader::from_reader(input_file);
-    let mut writer = cipher::EncryptionWriter::from_writer(output_file);
+    for path in paths {
+        if !is_zug_file(path) {
+            println!("Not a file encrypted using zug");
+            return;
+        }
 
-    let decryption_result = cipher::decrypt_from_stream(&key, &mut reader, &mut writer);
-    writer.flush().expect("Could not flush writer");
+        let input_file = std::fs::File::open(path).expect("Could not read file at {path:?}");
+        let decrypted_file_path = path.file_stem().unwrap().to_str().unwrap();
+        let output_file =
+            std::fs::File::create_new(decrypted_file_path).expect("Could not create output file.");
 
-    match decryption_result {
-        Ok(_) => (),
-        Err(err) => {
-            std::fs::remove_file(decrypted_file_path).expect("Could not delete file.");
-            println!("Error during decryption: {:?}", err)
+        let mut reader = cipher::EncryptionReader::from_reader(input_file);
+        let mut writer = cipher::EncryptionWriter::from_writer(output_file);
+
+        let decryption_result = cipher::decrypt_from_stream(&key, &mut reader, &mut writer);
+        writer.flush().expect("Could not flush writer");
+
+        match decryption_result {
+            Ok(_) => (),
+            Err(err) => {
+                std::fs::remove_file(decrypted_file_path).expect("Could not delete file.");
+                println!("Error during decryption: {:?}", err)
+            }
         }
     }
 }
@@ -116,9 +133,9 @@ fn is_zug_file(path: &path::Path) -> bool {
 fn print_usage() {
     println!("zug v0.2.0");
     println!("Usage:");
-    println!("-e <password> <path> [hint] Encrypts the file using the provided password.");
-    println!("-d <password> <path>        Decrypts the file file using the provided password.");
-    println!("-h <path>                   Displays the hint of an encrypted file.");
+    println!("-e <password> -h [hint] <path> Encrypts the file(s) using the provided password.");
+    println!("-d <password> <path>           Decrypts the file(s) using the provided password.");
+    println!("-h <path>                      Displays the hint of an encrypted file.");
 }
 
 pub fn execute() {

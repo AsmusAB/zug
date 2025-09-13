@@ -302,7 +302,7 @@ mod tests {
         }
 
         let cipher_text = writer_buf;
-        let mut reader = EncryptionReader::from_reader(create_cusor(cipher_text));
+        let mut reader = EncryptionReader::from_reader(create_cusor(cipher_text.clone()));
 
         let mut decrypted_plain_text = Vec::new();
         {
@@ -312,6 +312,7 @@ mod tests {
             decrypt_from_stream(&key, &mut reader, &mut writer).unwrap();
         }
 
+        assert_ne!(initial_plain_text, cipher_text);
         assert_eq!(initial_plain_text, decrypted_plain_text);
     }
 }
