@@ -12,33 +12,43 @@ The project derives its name from the Swiss canton of *Zug*. Switzerland being o
 - Embed optional human-readable hints in encrypted files.
 - Secure, chunked streaming encryption with AES-256-GCM-SIV.
 - Authentication on every encrypted block.
+
 ---
 
 ## Usage
 
-Encrypt a file.
+Encrypt a file (prompted for password).
 ```bash
-zug -e <password> -h [hint] <path>
+zug encrypt [--hint <hint>] <path(s)>
 ```
-Decrypt a file.
+Encrypt a file (password provided directly, e.g. for scripting).
 ```bash
-zug -d <password> <path>
+zug encrypt --password <password> [--hint <hint>] <path(s)>
+```
+Decrypt a file (prompted for password).
+```bash
+zug decrypt <path(s)>
+```
+Decrypt a file (password provided directly).
+```bash
+zug decrypt --password <password> <path(s)>
 ```
 Display file hint.
 ```bash
-zug -h <path>
+zug hint <path>
 ```
 
-- `<password>` : Password used for encryption/decryption.
-- `<path>` : Path to the file to encrypt.
-- `[hint]` : (OPTIONAL) Embed a hint in the encrypted file.
+- `--password` : Password used for encryption/decryption.
+- `<path(s)>` : One or more files to encrypt or decrypt.
+- `--hint` : (OPTIONAL) Embed a hint in the encrypted file.
 
 ---
 
 ## Example
 
 ```bash
-zug -e "VerySecurePassword" -h "my hint" my-file.txt
+zug encrypt --hint "my hint" my-file.txt
+# Encryption password: (hidden input)
 ```
 
 ---
@@ -70,7 +80,7 @@ zug -e "VerySecurePassword" -h "my hint" my-file.txt
 
 ## License
 
-Copyright 2025 Asmus Bartram
+Copyright 2026 Asmus Bartram
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 

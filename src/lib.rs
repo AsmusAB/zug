@@ -1,40 +1,19 @@
-use std::env;
 use std::path;
 
 const MIN_PASSWORD_LENGTH: usize = 16;
 
+mod args;
 mod cipher;
 mod key;
 
-fn handle_encryption(args: &[String]) {
-    let hint = match args[3].trim() {
-        "-h" => {
-            if args.len() < 4 {
-                panic!("Expected a hint")
-            }
-            Some(args[4].to_owned())
-        }
-        _ => None,
-    };
-
-    let password = args[2].trim();
+fn handle_encryption(password: &str, hint: Option<String>, paths: Vec<path::PathBuf>) {
     if password.len() < MIN_PASSWORD_LENGTH {
         println!("Password length is short. Please consider using a longer password.")
     }
 
     let key = key::Key::from_str(password);
 
-    let path_index_start = match hint {
-        Some(_) => 5,
-        None => 3,
-    };
-
-    let paths: Vec<&path::Path> = args[path_index_start..args.len()]
-        .iter()
-        .map(|x| path::Path::new(x))
-        .collect();
-
-    for path in paths {
+    for path in &paths {
         if !is_encryptable_file(path) {
             println!("Can only encrypt files with an extension.");
             return;
@@ -70,16 +49,10 @@ fn handle_encryption(args: &[String]) {
     }
 }
 
-fn handle_decryption(args: &[String]) {
-    let password = args[2].trim();
+fn handle_decryption(password: &str, paths: Vec<path::PathBuf>) {
     let key = key::Key::from_str(password);
 
-    let paths: Vec<&path::Path> = args[3..args.len()]
-        .iter()
-        .map(|x| path::Path::new(x))
-        .collect();
-
-    for path in paths {
+    for path in &paths {
         if !is_zug_file(path) {
             println!("Not a file encrypted using zug");
             return;
@@ -106,9 +79,7 @@ fn handle_decryption(args: &[String]) {
     }
 }
 
-fn handle_hint(args: &[String]) {
-    let path = path::Path::new(args[2].trim());
-
+fn handle_hint(path: &path::Path) {
     if !is_zug_file(path) {
         println!("Not a file encrypted using zug");
         return;
@@ -130,29 +101,14 @@ fn is_zug_file(path: &path::Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("zug")
 }
 
-fn print_usage() {
-    println!("zug v0.2.0");
-    println!("Usage:");
-    println!("-e <password> -h [hint] <path> Encrypts the file(s) using the provided password.");
-    println!("-d <password> <path>           Decrypts the file(s) using the provided password.");
-    println!("-h <path>                      Displays the hint of an encrypted file.");
-}
-
 pub fn execute() {
-    let args = env::args();
-
-    if args.len() < 2 {
-        print_usage();
-        return;
-    }
-
-    let args: Vec<String> = args.collect();
-    let mode = args[1].trim();
-
-    match mode {
-        "-e" => handle_encryption(&args),
-        "-d" => handle_decryption(&args),
-        "-h" => handle_hint(&args),
-        _ => print_usage(),
+    match args::parse() {
+        args::Command::Encrypt {
+            password,
+            hint,
+            paths,
+        } => handle_encryption(&password, hint, paths),
+        args::Command::Decrypt { password, paths } => handle_decryption(&password, paths),
+        args::Command::Hint { path } => handle_hint(&path),
     }
 }
