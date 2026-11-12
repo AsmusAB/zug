@@ -4,8 +4,8 @@ use std::{
 };
 
 use aes_gcm_siv::{
-    Aes256GcmSiv,
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    Aes256GcmSiv, Nonce,
+    aead::{Aead, Generate, KeyInit},
 };
 
 use crate::key::Key;
@@ -135,7 +135,7 @@ pub fn encrypt_from_stream<R: Read + Seek, W: Write>(
     let mut buf = [0u8; ENCRYPTION_BUFFER_SIZE];
 
     loop {
-        let nonce = Aes256GcmSiv::generate_nonce(&mut OsRng);
+        let nonce = Nonce::generate();
 
         let bytes_read = reader.read(&mut buf).unwrap();
 
@@ -197,7 +197,8 @@ pub fn decrypt_from_stream<R: Read + Seek, W: Write>(
 
     loop {
         let bytes_read = reader.read(&mut buf).unwrap();
-        let nonce = &buf[..IV_LENGTH];
+        let nonce_bytes = &buf[..IV_LENGTH];
+        let nonce: &Nonce = nonce_bytes.try_into().unwrap();
         let cipher_text_length = u32::from_le_bytes(
             buf[IV_LENGTH..IV_LENGTH + 4]
                 .try_into()
@@ -205,7 +206,7 @@ pub fn decrypt_from_stream<R: Read + Seek, W: Write>(
         ) as usize;
         let cipher_text = &buf[IV_LENGTH + 4..IV_LENGTH + 4 + cipher_text_length];
 
-        let plain_text = cipher.decrypt(nonce.into(), cipher_text)?;
+        let plain_text = cipher.decrypt(nonce, cipher_text)?;
 
         writer.write_all(&plain_text)?;
 
@@ -250,9 +251,8 @@ pub fn hint<R: Read>(reader: &mut std::io::BufReader<R>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use rand::RngCore;
-
     use super::*;
+    use rand::Rng;
 
     fn create_cusor(data: Vec<u8>) -> std::io::Cursor<Vec<u8>> {
         std::io::Cursor::new(data)
